@@ -1,8 +1,8 @@
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local StarterGui = game:GetService("StarterGui")
 local ChatService = game:GetService("Chat")
+local LogService = game:GetService("LogService")
 local localPlayer = Players.LocalPlayer
 local playerGui = localPlayer:WaitForChild("PlayerGui")
 
@@ -123,24 +123,38 @@ local function appendMessage(senderName, messageText)
     msgList.CanvasPosition = Vector2.new(0, msgList.AbsoluteCanvasSize.Y)
 end
 
--- 4. НАДЕЖНЫЙ ПЕРЕХВАТ СООБЩЕНИЙ С СЕРВЕРА С УЧЕТОМ PLACE_ID
--- Чат привязан жестко к ID этой конкретной карты и сервера
-local function hookPlayer(p)
-    p.Chatted:Connect(function(msg)
-        appendMessage(p.DisplayName or p.Name, msg)
-    end)
+-- 4. ОБХОД БЛОКИРОВКИ: ПЕРЕХВАТ ИЗ ОБЩИХ СИСТЕМНЫХ ЛОГОВ (LogService)
+-- Этот метод читает то, что игра выводит на экран, обходя блокировку .Chatted
+LogService.MessageReceived:Connect(function(message, messageType)
+    if messageType == Enum.MessageType.MessageOutput or messageType == Enum.MessageType.MessageInfo then
+        -- Проверяем структуру стандартной строки чата Roblox: "[Никнейм]: Сообщение"
+        local matchName, matchText = message:match("^%[(.-)%]:%s*(.*)$")
+        if matchName and matchText then
+            -- Проверяем, чтобы сообщение не дублировало наше собственное
+            if matchName ~= localPlayer.Name and matchName ~= localPlayer.DisplayName then
+                appendMessage(matchName, matchText)
+            end
+        end
+    end
+end)
+
+-- Резервный метод на случай старых Legacy серверов
+for _, p in ipairs(Players:GetPlayers()) do
+    if p ~= localPlayer then
+        p.Chatted:Connect(function(msg) appendMessage(p.DisplayName or p.Name, msg) end)
+    end
 end
+Players.PlayerAdded:Connect(function(p)
+    p.Chatted:Connect(function(msg) appendMessage(p.DisplayName or p.Name, msg) end)
+end)
 
-for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
-Players.PlayerAdded:Connect(hookPlayer)
-
--- 5. ОТПРАВКА СООБЩЕНИЯ ВНУТРИ ТЕКУЩЕЙ ИГРЫ
+-- 5. ОТПРАВКА ВАШЕГО СООБЩЕНИЯ ВНУТРИ ТЕКУЩЕЙ ИГРЫ
 local function sendMessage()
     local text = textBox.Text
     if text == "" then return end
     textBox.Text = ""
     
-    -- Тот самый 100% рабочий метод от головы персонажа
+    -- Твой проверенный рабочий метод от головы персонажа
     if localPlayer.Character and localPlayer.Character:FindFirstChild("Head") then
         ChatService:Chat(localPlayer.Character.Head, text, Enum.ChatColor.White)
         appendMessage(localPlayer.DisplayName or localPlayer.Name, text)
