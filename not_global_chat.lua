@@ -9,7 +9,7 @@ local playerGui = localPlayer:WaitForChild("PlayerGui")
 -- 1. СТИРАЕМ СТАНДАРТНЫЙ БЛОКИРОВАННЫЙ ЧАТ ROBLOX
 task.spawn(function()
     local retries = 0
-    while retries < 12 do
+    while retries < 10 do
         local success = pcall(function()
             StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
         end)
@@ -20,7 +20,9 @@ task.spawn(function()
 end)
 
 -- Очистка дубликатов при перезапуске инжектора
-if playerGui:FindFirstChild("RobloxLocalServerChat") then playerGui.RobloxLocalServerChat:Destroy() end
+if playerGui:FindFirstChild("RobloxLocalServerChat") then 
+    playerGui.RobloxLocalServerChat:Destroy() 
+end
 
 -- 2. СОЗДАНИЕ ИНТЕРФЕЙСА (ВИЗУАЛЬНАЯ КОПИЯ ЧАТА ROBLOX)
 local screenGui = Instance.new("ScreenGui")
@@ -29,7 +31,7 @@ screenGui.ResetOnSpawn = false
 screenGui.DisplayOrder = 99999
 screenGui.Parent = playerGui
 
--- Маленькая иконка чата в левом верхнем углу (как оригинальная)
+-- Маленькая иконка чата в левом верхнем углу
 local chatIcon = Instance.new("TextButton")
 chatIcon.Size = UDim2.new(0, 32, 0, 32)
 chatIcon.Position = UDim2.new(0, 16, 0, 4)
@@ -44,12 +46,12 @@ local iconCorner = Instance.new("UICorner")
 iconCorner.CornerRadius = UDim.new(0, 8)
 iconCorner.Parent = chatIcon
 
--- Рамка чата (Размеры и положение стандартного чата)
+-- Рамка чата
 local chatFrame = Instance.new("Frame")
 chatFrame.Size = UDim2.new(0, 350, 0, 200)
 chatFrame.Position = UDim2.new(0, 16, 0, 42)
 chatFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-chatFrame.BackgroundTransparency = 0.55 -- Полупрозрачный фон
+chatFrame.BackgroundTransparency = 0.55
 chatFrame.Visible = true
 chatFrame.Active = true
 chatFrame.Parent = screenGui
@@ -81,7 +83,7 @@ textBox.Size = UDim2.new(1, -12, 0, 30)
 textBox.Position = UDim2.new(0, 6, 1, -36)
 textBox.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 textBox.BackgroundTransparency = 0.3
-textBox.PlaceholderText = "Нажмите сюда или введите текст..."
+textBox.PlaceholderText = "Нажмите сюда, чтобы ввести текст..."
 textBox.PlaceholderColor3 = Color3.fromRGB(190, 190, 190)
 textBox.Text = ""
 textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
@@ -123,47 +125,47 @@ local function appendMessage(senderName, messageText)
     msgList.CanvasPosition = Vector2.new(0, msgList.AbsoluteCanvasSize.Y)
 end
 
--- 4. ОБХОД БЛОКИРОВКИ: ПЕРЕХВАТ ИЗ ОБЩИХ СИСТЕМНЫХ ЛОГОВ (LogService)
--- Этот метод читает то, что игра выводит на экран, обходя блокировку .Chatted
+-- 4. ИСПРАВЛЕННЫЙ ПЕРЕХВАТ СООБЩЕНИЙ ЧЕРЕЗ LOGSERVICE
 LogService.MessageReceived:Connect(function(message, messageType)
-    if messageType == Enum.MessageType.MessageOutput or messageType == Enum.MessageType.MessageInfo then
-        -- Проверяем структуру стандартной строки чата Roblox: "[Никнейм]: Сообщение"
-        local matchName, matchText = message:match("^%[(.-)%]:%s*(.*)$")
-        if matchName and matchText then
-            -- Проверяем, чтобы сообщение не дублировало наше собственное
-            if matchName ~= localPlayer.Name and matchName ~= localPlayer.DisplayName then
-                appendMessage(matchName, matchText)
+    -- Безопасная проверка типа через pcall, чтобы исключить зависание
+    pcall(function()
+        if messageType == Enum.MessageType.MessageOutput or messageType == Enum.MessageType.MessageInfo then
+            local matchName, matchText = message:match("^%[(.-)%]:%s*(.*)$")
+            if matchName and matchText then
+                if matchName ~= localPlayer.Name and matchName ~= localPlayer.DisplayName then
+                    appendMessage(matchName, matchText)
+                end
             end
         end
-    end
+    end)
 end)
 
--- Резервный метод на случай старых Legacy серверов
-for _, p in ipairs(Players:GetPlayers()) do
+-- Дополнительный классический метод (для старых карт)
+local function hookPlayer(p)
     if p ~= localPlayer then
         p.Chatted:Connect(function(msg) appendMessage(p.DisplayName or p.Name, msg) end)
     end
 end
-Players.PlayerAdded:Connect(function(p)
-    p.Chatted:Connect(function(msg) appendMessage(p.DisplayName or p.Name, msg) end)
-end)
+for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
+Players.PlayerAdded:Connect(hookPlayer)
 
--- 5. ОТПРАВКА ВАШЕГО СООБЩЕНИЯ ВНУТРИ ТЕКУЩЕЙ ИГРЫ
+-- 5. ОТПРАВКА СООБЩЕНИЯ (Ваш рабочий метод)
 local function sendMessage()
     local text = textBox.Text
     if text == "" then return end
     textBox.Text = ""
     
-    -- Твой проверенный рабочий метод от головы персонажа
     if localPlayer.Character and localPlayer.Character:FindFirstChild("Head") then
         ChatService:Chat(localPlayer.Character.Head, text, Enum.ChatColor.White)
         appendMessage(localPlayer.DisplayName or localPlayer.Name, text)
     end
 end
 
-textBox.FocusLost:Connect(function(enterPressed) if enterPressed then sendMessage() end end)
+textBox.FocusLost:Connect(function(enterPressed) 
+    if enterPressed then sendMessage() end 
+end)
 
--- Переключение видимости по нажатию кнопки
+-- КНОПКА ЗАКРЫТИЯ/ОТКРЫТИЯ (Теперь снова работает!)
 chatIcon.MouseButton1Click:Connect(function()
     chatFrame.Visible = not chatFrame.Visible
 end)
