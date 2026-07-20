@@ -1,171 +1,244 @@
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local StarterGui = game:GetService("StarterGui")
-local ChatService = game:GetService("Chat")
-local LogService = game:GetService("LogService")
-local localPlayer = Players.LocalPlayer
-local playerGui = localPlayer:WaitForChild("PlayerGui")
+-- НАСТРОЙКИ СОБСТВЕННОГО ИНТЕРФЕЙСА
+local MAIN_COLOR = Color3.fromRGB(30, 30, 35)      -- Темный футуристичный фон чата
+local ACCENT_COLOR = Color3.fromRGB(138, 43, 226)   -- Фиолетовый неоновый акцент (кнопки)
+local TEXT_COLOR = Color3.fromRGB(240, 240, 240)   -- Цвет основного текста
+local BG_TRANSPARENCY = 0.2                        -- Прозрачность окна
+local FONT_SIZE = 15                               -- Размер текста
+local FONT_STYLE = Enum.Font.GothamMedium          -- Шрифт
 
--- 1. СТИРАЕМ СТАНДАРТНЫЙ БЛОКИРОВАННЫЙ ЧАТ ROBLOX
-task.spawn(function()
-    local retries = 0
-    while retries < 10 do
-        local success = pcall(function()
-            StarterGui:SetCoreGuiEnabled(Enum.CoreGuiType.Chat, false)
+-- Сервисы
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local UserInputService = game:GetService("UserInputService")
+local localPlayer = Players.LocalPlayer
+
+-- Создание автономного GUI
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "StandalonePrivateChat"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.Parent = localPlayer:WaitForChild("PlayerGui")
+
+--- ==========================================
+--- 1. ПЛАВАЮЩАЯ КНОПКА ВЫЗОВА (TOGGLE)
+--- ==========================================
+local ToggleButton = Instance.new("TextButton")
+local ToggleCorner = Instance.new("UICorner")
+
+ToggleButton.Size = UDim2.new(0, 60, 0, 60)
+ToggleButton.Position = UDim2.new(0.02, 0, 0.2, 0)
+ToggleButton.BackgroundColor3 = ACCENT_COLOR
+ToggleButton.Text = "🔒" -- Иконка приватного/своего чата
+ToggleButton.TextSize = 26
+ToggleButton.TextColor3 = TEXT_COLOR
+ToggleButton.Font = FONT_STYLE
+ToggleButton.Active = true
+ToggleButton.ZIndex = 5
+ToggleButton.Parent = ScreenGui
+
+ToggleCorner.CornerRadius = UDim.new(0.5, 0)
+ToggleCorner.Parent = ToggleButton
+
+-- Логика перетаскивания (Draggable) для мобильных телефонов
+local dragging, dragInput, dragStart, startPos
+local function update(input)
+    local delta = input.Position - dragStart
+    ToggleButton.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+end
+
+ToggleButton.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = ToggleButton.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then dragging = false end
         end)
-        if success then break end
-        retries = retries + 1
-        task.wait(0.5)
     end
 end)
 
--- Очистка дубликатов при перезапуске инжектора
-if playerGui:FindFirstChild("RobloxLocalServerChat") then 
-    playerGui.RobloxLocalServerChat:Destroy() 
+ToggleButton.InputChanged:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then dragInput = input end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+    if input == dragInput and dragging then update(input) end
+end)
+
+--- ==========================================
+--- 2. АВТОНОМНОЕ ОКНО ЧАТА
+--- ==========================================
+local MainFrame = Instance.new("Frame")
+local MainCorner = Instance.new("UICorner")
+
+MainFrame.Size = UDim2.new(0.45, 0, 0.5, 0) -- Адаптивно под экраны смартфонов
+MainFrame.Position = UDim2.new(0.02, 0, 0.3, 0)
+MainFrame.BackgroundColor3 = MAIN_COLOR
+MainFrame.BackgroundTransparency = BG_TRANSPARENCY
+MainFrame.Visible = false
+MainFrame.Parent = ScreenGui
+
+MainCorner.CornerRadius = UDim.new(0, 14)
+MainCorner.Parent = MainFrame
+
+local ScrollingFrame = Instance.new("ScrollingFrame")
+local UIListLayout = Instance.new("UIListLayout")
+local UIPadding = Instance.new("UIPadding")
+
+ScrollingFrame.Size = UDim2.new(0.96, 0, 0.8, 0)
+ScrollingFrame.Position = UDim2.new(0.02, 0, 0.02, 0)
+ScrollingFrame.BackgroundTransparency = 1
+ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+ScrollingFrame.ScrollBarThickness = 3
+ScrollingFrame.ScrollBarImageColor3 = ACCENT_COLOR
+ScrollingFrame.Parent = MainFrame
+
+UIListLayout.Parent = ScrollingFrame
+UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+UIListLayout.Padding = UDim.new(0, 5)
+
+UIPadding.Parent = ScrollingFrame
+UIPadding.PaddingLeft = UDim.new(0, 8)
+UIPadding.PaddingRight = UDim.new(0, 8)
+
+UIListLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    ScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, UIListLayout.AbsoluteContentSize.Y + 10)
+    ScrollingFrame.CanvasPosition = Vector2.new(0, UIListLayout.AbsoluteContentSize.Y)
+end)
+
+--- ==========================================
+--- 3. СВОЯ СИСТЕМА ДЛЯ ВВОДА СООБЩЕНИЙ
+--- ==========================================
+local InputFrame = Instance.new("Frame")
+local TextBox = Instance.new("TextBox")
+local SendButton = Instance.new("TextButton")
+local InputCorner = Instance.new("UICorner")
+local SendCorner = Instance.new("UICorner")
+
+InputFrame.Size = UDim2.new(0.96, 0, 0.14, 0)
+InputFrame.Position = UDim2.new(0.02, 0, 0.84, 0)
+InputFrame.BackgroundTransparency = 1
+InputFrame.Parent = MainFrame
+
+-- Поле ввода
+TextBox.Size = UDim2.new(0.75, 0, 1, 0)
+TextBox.Position = UDim2.new(0, 0, 0, 0)
+TextBox.BackgroundColor3 = Color3.fromRGB(45, 45, 50)
+TextBox.TextColor3 = TEXT_COLOR
+TextBox.TextSize = FONT_SIZE
+TextBox.Font = FONT_STYLE
+TextBox.PlaceholderText = "Напишите что-то в свой чат..."
+TextBox.PlaceholderColor3 = Color3.fromRGB(140, 140, 140)
+TextBox.Text = ""
+TextBox.ClearTextOnFocus = false
+TextBox.TextXAlignment = Enum.TextXAlignment.Left
+TextBox.Parent = InputFrame
+
+InputCorner.CornerRadius = UDim.new(0, 8)
+InputCorner.Parent = TextBox
+
+local TextPadding = Instance.new("UIPadding")
+TextPadding.PaddingLeft = UDim.new(0, 12)
+TextPadding.Parent = TextBox
+
+-- Кнопка отправки
+SendButton.Size = UDim2.new(0.23, 0, 1, 0)
+SendButton.Position = UDim2.new(0.77, 0, 0, 0)
+SendButton.BackgroundColor3 = ACCENT_COLOR
+SendButton.Text = "SEND"
+SendButton.TextColor3 = TEXT_COLOR
+SendButton.TextSize = FONT_SIZE
+SendButton.Font = Enum.Font.GothamBold
+SendButton.Parent = InputFrame
+
+SendCorner.CornerRadius = UDim.new(0, 8)
+SendCorner.Parent = SendButton
+
+ToggleButton.MouseButton1Click:Connect(function()
+    MainFrame.Visible = not MainFrame.Visible
+end)
+
+--- ==========================================
+--- 4. ПОЛНОСТЬЮ АЛЬТЕРНАТИВНАЯ СЕТЕВАЯ ЛОГИКА
+--- ==========================================
+
+-- Функция локального вывода сообщения в НАШЕ окно
+local function displayCustomMessage(senderName, messageText, color)
+    local MessageLabel = Instance.new("TextLabel")
+    MessageLabel.Size = UDim2.new(1, 0, 0, 0)
+    MessageLabel.AutomaticSize = Enum.AutomaticSize.Y
+    MessageLabel.BackgroundTransparency = 1
+    MessageLabel.Text = "• [" .. senderName .. "]: " .. messageText
+    MessageLabel.TextColor3 = color or TEXT_COLOR
+    MessageLabel.TextSize = FONT_SIZE
+    MessageLabel.Font = FONT_STYLE
+    MessageLabel.TextXAlignment = Enum.TextXAlignment.Left
+    MessageLabel.TextWrapped = true
+    MessageLabel.Parent = ScrollingFrame
 end
 
--- 2. СОЗДАНИЕ ИНТЕРФЕЙСА (ВИЗУАЛЬНАЯ КОПИЯ ЧАТА ROBLOX)
-local screenGui = Instance.new("ScreenGui")
-screenGui.Name = "RobloxLocalServerChat"
-screenGui.ResetOnSpawn = false
-screenGui.DisplayOrder = 99999
-screenGui.Parent = playerGui
+-- Ищем скрытые каналы репликации в текущей игре
+local networkEvent = nil
+local possibleNames = {"SayMessageRequest", "Chat", "Message", "Send", "Tell", "Mute", "Report"}
 
--- Маленькая иконка чата в левом верхнем углу
-local chatIcon = Instance.new("TextButton")
-chatIcon.Size = UDim2.new(0, 32, 0, 32)
-chatIcon.Position = UDim2.new(0, 16, 0, 4)
-chatIcon.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
-chatIcon.BackgroundTransparency = 0.4
-chatIcon.Text = "💬"
-chatIcon.TextSize = 16
-chatIcon.TextColor3 = Color3.fromRGB(255, 255, 255)
-chatIcon.Parent = screenGui
-
-local iconCorner = Instance.new("UICorner")
-iconCorner.CornerRadius = UDim.new(0, 8)
-iconCorner.Parent = chatIcon
-
--- Рамка чата
-local chatFrame = Instance.new("Frame")
-chatFrame.Size = UDim2.new(0, 350, 0, 200)
-chatFrame.Position = UDim2.new(0, 16, 0, 42)
-chatFrame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-chatFrame.BackgroundTransparency = 0.55
-chatFrame.Visible = true
-chatFrame.Active = true
-chatFrame.Parent = screenGui
-
-local chatCorner = Instance.new("UICorner")
-chatCorner.CornerRadius = UDim.new(0, 6)
-chatCorner.Parent = chatFrame
-
--- Окно прокрутки сообщений
-local msgList = Instance.new("ScrollingFrame")
-msgList.Size = UDim2.new(1, -12, 1, -46)
-msgList.Position = UDim2.new(0, 6, 0, 6)
-msgList.BackgroundTransparency = 1
-msgList.CanvasSize = UDim2.new(0, 0, 0, 0)
-msgList.ScrollBarThickness = 3
-msgList.ScrollBarImageColor3 = Color3.fromRGB(255, 255, 255)
-msgList.ScrollBarImageTransparency = 0.6
-msgList.ZIndex = 51
-msgList.Parent = chatFrame
-
-local listLayout = Instance.new("UIListLayout")
-listLayout.SortOrder = Enum.SortOrder.LayoutOrder
-listLayout.Padding = UDim.new(0, 4)
-listLayout.Parent = msgList
-
--- Поле ввода текста
-local textBox = Instance.new("TextBox")
-textBox.Size = UDim2.new(1, -12, 0, 30)
-textBox.Position = UDim2.new(0, 6, 1, -36)
-textBox.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
-textBox.BackgroundTransparency = 0.3
-textBox.PlaceholderText = "Нажмите сюда, чтобы ввести текст..."
-textBox.PlaceholderColor3 = Color3.fromRGB(190, 190, 190)
-textBox.Text = ""
-textBox.TextColor3 = Color3.fromRGB(255, 255, 255)
-textBox.TextSize = 14
-textBox.Font = Enum.Font.SourceSans
-textBox.TextXAlignment = Enum.TextXAlignment.Left
-textBox.ClearTextOnFocus = false
-textBox.ZIndex = 52
-textBox.Parent = chatFrame
-
-local boxCorner = Instance.new("UICorner")
-boxCorner.CornerRadius = UDim.new(0, 5)
-boxCorner.Parent = textBox
-
-local boxPadding = Instance.new("UIPadding")
-boxPadding.PaddingLeft = UDim.new(0, 8)
-boxPadding.Parent = textBox
-
--- 3. ФУНКЦИЯ ОТРИСОВКИ ТЕКСТА
-local function appendMessage(senderName, messageText)
-    local msgLabel = Instance.new("TextLabel")
-    msgLabel.Size = UDim2.new(1, -10, 0, 0)
-    msgLabel.BackgroundTransparency = 1
-    msgLabel.TextSize = 15
-    msgLabel.Font = Enum.Font.SourceSansBold
-    msgLabel.TextWrapped = true
-    msgLabel.TextXAlignment = Enum.TextXAlignment.Left
-    msgLabel.RichText = true
-    msgLabel.ZIndex = 51
-    
-    local isMe = (senderName == localPlayer.DisplayName or senderName == localPlayer.Name)
-    local nameColor = isMe and "rgb(0, 170, 255)" or "rgb(240, 180, 0)"
-    
-    msgLabel.Text = string.format("<font color='%s'><b>%s</b></font><font color='rgb(255, 255, 255)'><b>:</b> %s</font>", nameColor, senderName, messageText)
-    msgLabel.Parent = msgList
-    msgLabel.AutomaticSize = Enum.AutomaticSize.Y
-    
-    task.wait(0.02)
-    msgList.CanvasPosition = Vector2.new(0, msgList.AbsoluteCanvasSize.Y)
-end
-
--- 4. ИСПРАВЛЕННЫЙ ПЕРЕХВАТ СООБЩЕНИЙ ЧЕРЕЗ LOGSERVICE
-LogService.MessageReceived:Connect(function(message, messageType)
-    -- Безопасная проверка типа через pcall, чтобы исключить зависание
-    pcall(function()
-        if messageType == Enum.MessageType.MessageOutput or messageType == Enum.MessageType.MessageInfo then
-            local matchName, matchText = message:match("^%[(.-)%]:%s*(.*)$")
-            if matchName and matchText then
-                if matchName ~= localPlayer.Name and matchName ~= localPlayer.DisplayName then
-                    appendMessage(matchName, matchText)
-                end
+-- Авто-поиск любого подходящего сетевого события для симуляции отправки данных
+for _, desc in pairs(game:GetDescendants()) do
+    if desc:IsA("RemoteEvent") then
+        for _, name in pairs(possibleNames) do
+            if desc.Name:find(name) then
+                networkEvent = desc
+                break
             end
+        end
+    end
+    if networkEvent then break end
+end
+
+-- Если ничего не найдено, используем стандартную скрытую уязвимость дефолтного DefaultChatSystemChatEvents
+if not networkEvent then
+    local folder = ReplicatedStorage:FindFirstChild("DefaultChatSystemChatEvents")
+    networkEvent = folder and folder:FindFirstChild("SayMessageRequest")
+end
+
+-- СВЯЗЬ МЕЖДУ КЛИЕНТАМИ ЧЕРЕЗ АЛЬТЕРНАТИВНЫЙ ТРАФИК
+local function sendStandaloneMessage()
+    local text = TextBox.Text
+    if text == "" then return end
+    TextBox.Text = ""
+
+    -- Отображаем у себя в кастомном окне мгновенно
+    displayCustomMessage(localPlayer.Name, text, ACCENT_COLOR)
+
+    -- Отправляем в обход системного GUI через найденный туннель
+    if networkEvent and networkEvent:IsA("RemoteEvent") then
+        -- Отправляем сырые данные. Сервер отреплицирует это другим игрокам
+        networkEvent:FireServer(text, "All")
+    elseif networkEvent and networkEvent:IsA("RemoteFunction") then
+        task.spawn(function() networkEvent:InvokeServer(text, "All") end)
+    end
+end
+
+SendButton.MouseButton1Click:Connect(sendStandaloneMessage)
+TextBox.FocusLost:Connect(function(enterPressed)
+    if enterPressed then sendStandaloneMessage() end
+end)
+
+-- ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК: Ловит сообщения от других игроков ИЗ СЕТИ, минуя GUI чата Roblox
+local chattedConnection
+chattedConnection = Players.PlayerAdded:Connect(function(player)
+    player.Chatted:Connect(function(msg)
+        if player ~= localPlayer then
+            displayCustomMessage(player.Name, msg, TEXT_COLOR)
         end
     end)
 end)
 
--- Дополнительный классический метод (для старых карт)
-local function hookPlayer(p)
-    if p ~= localPlayer then
-        p.Chatted:Connect(function(msg) appendMessage(p.DisplayName or p.Name, msg) end)
-    end
-end
-for _, p in ipairs(Players:GetPlayers()) do hookPlayer(p) end
-Players.PlayerAdded:Connect(hookPlayer)
-
--- 5. ОТПРАВКА СООБЩЕНИЯ (Ваш рабочий метод)
-local function sendMessage()
-    local text = textBox.Text
-    if text == "" then return end
-    textBox.Text = ""
-    
-    if localPlayer.Character and localPlayer.Character:FindFirstChild("Head") then
-        ChatService:Chat(localPlayer.Character.Head, text, Enum.ChatColor.White)
-        appendMessage(localPlayer.DisplayName or localPlayer.Name, text)
+-- Подключаем тех игроков, кто уже находится на сервере
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= localPlayer then
+        player.Chatted:Connect(function(msg)
+            displayCustomMessage(player.Name, msg, TEXT_COLOR)
+        end)
     end
 end
 
-textBox.FocusLost:Connect(function(enterPressed) 
-    if enterPressed then sendMessage() end 
-end)
-
--- КНОПКА ЗАКРЫТИЯ/ОТКРЫТИЯ (Теперь снова работает!)
-chatIcon.MouseButton1Click:Connect(function()
-    chatFrame.Visible = not chatFrame.Visible
-end)
+displayCustomMessage("СИСТЕМА", "Альтернативный изолированный чат запущен. Интерфейс Roblox проигнорирован.", Color3.fromRGB(0, 255, 150))
